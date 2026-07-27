@@ -110,6 +110,26 @@ func fileExists(filename string) bool {
 	return !info.IsDir()
 }
 
+// detectBackend returns the name of the backend node implied by its BIP 14
+// subversion string, or "" if it isn't one we recognize.
+//
+// zakura is matched first because a BIP 14 user agent can carry more than one
+// token: zakura composes things like "/Zakura:x.y.z/MagicBean:6.3.0/" when
+// advertising zcashd compatibility, and the leading token is the real node.
+// Matching MagicBean first would misidentify such a node as zcashd and then
+// demand zcashd's experimental features from it.
+func detectBackend(subver string) string {
+	switch {
+	case strings.Contains(subver, "/Zakura:"):
+		return "zakura"
+	case strings.Contains(subver, "/Zebra:"):
+		return "zebrad"
+	case strings.Contains(subver, "/MagicBean:"):
+		return "zcashd"
+	}
+	return ""
+}
+
 func startServer(opts *common.Options) error {
 	if opts.LogFile != "" {
 		// instead write parsable logs for logstash/splunk/etc
@@ -238,22 +258,15 @@ func startServer(opts *common.Options) error {
 			" branchID ", getLightdInfo.ConsensusBranchId)
 		chainName = getLightdInfo.ChainName
 
-		// Detect the backend from its subversion string. zakura is checked
-		// first because a BIP 14 user agent can carry more than one token
-		// (zakura composes things like "/Zakura:x.y.z/MagicBean:6.3.0/" when
-		// advertising compatibility), and the leading token is the real node.
 		subver := getLightdInfo.ZcashdSubversion
-		backend := ""
-		switch {
-		case strings.Contains(subver, "/Zakura:"):
-			backend = "zakura"
-		case strings.Contains(subver, "/Zebra:"):
-			backend = "zebrad"
-		case strings.Contains(subver, "/MagicBean:"):
-			backend = "zcashd"
-		}
+		backend := detectBackend(subver)
 		if backend != "" {
 			common.NodeName = backend
+		} else {
+			// Only reachable with --no-backend-check; otherwise the switch
+			// below exits. Don't leave NodeName at its "zebrad" default, which
+			// would mislabel the node in every later log message.
+			common.NodeName = "unknown"
 		}
 
 		// Verify that the backend is one we know how to talk to and, for
